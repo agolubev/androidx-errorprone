@@ -14,36 +14,16 @@
  *   limitations under the License.
  */
 
-import com.android.build.api.variant.ApplicationAndroidComponentsExtension
-import com.android.build.api.variant.BuiltArtifactsLoader
-import com.android.build.api.artifact.MultipleArtifact
-import com.android.build.api.artifact.SingleArtifact
-import com.android.build.api.variant.AndroidComponentsExtension
-import com.android.build.api.variant.Variant
-import com.android.build.gradle.AppPlugin
-import java.io.File
-import java.util.jar.JarFile
-import org.gradle.api.DefaultTask
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.artifacts.Configuration
-import org.gradle.api.file.DirectoryProperty
-import org.gradle.api.logging.Logging
-import org.gradle.api.provider.MapProperty
-import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputDirectory
-import org.gradle.api.tasks.Optional
-import org.gradle.api.tasks.OutputDirectory
-import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.kotlin.dsl.exclude
-import org.gradle.kotlin.dsl.register
 import org.gradle.process.CommandLineArgumentProvider
-import java.lang.IllegalStateException
 
 /**
  * This custom plugin will register a task output as a generated source folder for
@@ -56,13 +36,17 @@ private const val ERROR_PRONE_CONFIGURATION = "errorprone"
 private const val ERROR_PRONE_VERSION = "com.google.errorprone:error_prone_core:2.14.0"
 class CustomPlugin : Plugin<Project> {
 
-
     override fun apply(project: Project) {
-        val extension = project.extensions.findByType(AndroidComponentsExtension::class.java)
-        extension?.onVariants(extension.selector().withBuildType("release")) { variant ->
-            project.makeErrorProneTask(variant)
+        project.afterEvaluate {
+            project.tasks.withType(JavaCompile::class.java)
+                .named { it.contains("Release") }.firstOrNull()
+                ?.let { project.makeErrorProneTask(it) }
+            // alternatively to get provider. Still needs to resolve it once copy
+            // attributes to new error prone task
+            // project.tasks.withType(JavaCompile::class.java).named("compileReleaseJavaWithJavac")
         }
     }
+}
 
     private fun Project.createErrorProneConfiguration(): Configuration {
         val errorProneConfiguration =
@@ -77,36 +61,30 @@ class CustomPlugin : Plugin<Project> {
     }
 
     private fun Project.makeErrorProneTask(
-        variant: Variant,
+        compileTask: JavaCompile
     ) {
         maybeRegister<JavaCompile>(
             name = "runErrorProne",
             onConfigure = {
                 val config = createErrorProneConfiguration()
-
-                it.classpath = variant.compileClasspath
-                it.setSource(variant.javaCompilation.source)
+                it.classpath = compileTask.classpath
+                it.source = compileTask.source
                 it.destinationDirectory.set(layout.buildDirectory.dir("errorProne"))
-                it.options.compilerArgs = variant.javaCompilation.compilerArgs.toMutableList()
+                it.options.compilerArgs = compileTask.options.compilerArgs.toMutableList()
                 it.options.annotationProcessorPath =
-                    variant.annotationProcessorConfiguration + config
-                it.options.bootstrapClasspath = this.project.files(variant.javaCompilation.bootstrapClasspath) //?
-                it.sourceCompatibility = variant.javaCompilation.sourceCompatibility.toString()
-                it.targetCompatibility = variant.javaCompilation.targetCompatibility.toString()
-                it.options.compilerArgumentProviders.add(
-                    CommandLineArgumentProviderAdapter(
-                        variant.javaCompilation.annotationProcessor.arguments
-                    )
-                )
+                    compileTask.options.annotationProcessorPath?.let{ it + config } ?: config
+                it.options.bootstrapClasspath = compileTask.options.bootstrapClasspath
+                it.sourceCompatibility = compileTask.sourceCompatibility
+                it.targetCompatibility = compileTask.targetCompatibility
                 it.configureWithErrorProne()
             },
             onRegister = { errorProneProvider ->
                 // will it resolve task?
-                // tasks.named("check").configure { it.dependsOn(errorProneProvider) }\
+                // tasks.named("check").configure { it.dependsOn(errorProneProvider) }
             }
         )
     }
-}
+
 
 private fun JavaCompile.configureWithErrorProne() {
     options.isFork = true
