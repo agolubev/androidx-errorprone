@@ -35,6 +35,7 @@ import org.gradle.process.CommandLineArgumentProvider
  */
 private const val ERROR_PRONE_CONFIGURATION = "errorprone"
 private const val ERROR_PRONE_VERSION = "com.google.errorprone:error_prone_core:2.14.0"
+
 class CustomPlugin : Plugin<Project> {
 
     override fun apply(project: Project) {
@@ -44,21 +45,46 @@ class CustomPlugin : Plugin<Project> {
     }
 }
 
-    private fun Project.createErrorProneConfiguration(): Configuration {
-        val errorProneConfiguration =
-            configurations.create(ERROR_PRONE_CONFIGURATION) {
-                it.isVisible = false
-                it.isCanBeConsumed = false
-                it.isCanBeResolved = true
-                it.exclude(group = "com.google.errorprone", module = "javac")
-            }
-        dependencies.add(ERROR_PRONE_CONFIGURATION, ERROR_PRONE_VERSION)
-        return errorProneConfiguration
-    }
+private fun Project.createErrorProneConfiguration(): Configuration {
+    val errorProneConfiguration =
+        configurations.create(ERROR_PRONE_CONFIGURATION) {
+            it.isVisible = false
+            it.isCanBeConsumed = false
+            it.isCanBeResolved = true
+            it.exclude(group = "com.google.errorprone", module = "javac")
+        }
+    dependencies.add(ERROR_PRONE_CONFIGURATION, ERROR_PRONE_VERSION)
+    return errorProneConfiguration
+}
 
-    private fun Project.makeErrorProneTask() {
+private fun Project.makeErrorProneTask() {
+    maybeRegister<JavaCompile>(
+        name = "runErrorProne",
+        onConfigure = {
+            val compileTask = this.tasks.withType(JavaCompile::class.java)
+                .matching { task -> task.name.contains("Release") }.firstOrNull()
 
-    }
+            require(compileTask != null)
+            val config = createErrorProneConfiguration()
+            it.classpath = compileTask.classpath
+            it.source = compileTask.source
+            it.destinationDirectory.set(layout.buildDirectory.dir("errorProne"))
+            it.options.compilerArgs = compileTask.options.compilerArgs.toMutableList()
+            it.options.annotationProcessorPath =
+                compileTask.options.annotationProcessorPath?.let { collection -> collection + config }
+                    ?: config
+            it.options.bootstrapClasspath = compileTask.options.bootstrapClasspath
+            it.sourceCompatibility = compileTask.sourceCompatibility
+            it.targetCompatibility = compileTask.targetCompatibility
+            it.configureWithErrorProne()
+
+            it.dependsOn(compileTask.dependsOn)
+        },
+        onRegister = { errorProneProvider ->
+            tasks.named("check").configure { it.dependsOn(errorProneProvider) }
+        }
+    )
+}
 
 
 private fun JavaCompile.configureWithErrorProne() {
