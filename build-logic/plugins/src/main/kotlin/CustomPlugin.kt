@@ -19,6 +19,7 @@ import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.provider.Provider
+import org.gradle.api.specs.Spec
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.compile.JavaCompile
@@ -38,12 +39,7 @@ class CustomPlugin : Plugin<Project> {
 
     override fun apply(project: Project) {
         project.afterEvaluate {
-            project.tasks.withType(JavaCompile::class.java)
-                .named { it.contains("Release") }.firstOrNull()
-                ?.let { project.makeErrorProneTask(it) }
-            // alternatively to get provider. Still needs to resolve it once copy
-            // attributes to new error prone task
-            // project.tasks.withType(JavaCompile::class.java).named("compileReleaseJavaWithJavac")
+            project.makeErrorProneTask()
         }
     }
 }
@@ -60,29 +56,8 @@ class CustomPlugin : Plugin<Project> {
         return errorProneConfiguration
     }
 
-    private fun Project.makeErrorProneTask(
-        compileTask: JavaCompile
-    ) {
-        maybeRegister<JavaCompile>(
-            name = "runErrorProne",
-            onConfigure = {
-                val config = createErrorProneConfiguration()
-                it.classpath = compileTask.classpath
-                it.source = compileTask.source
-                it.destinationDirectory.set(layout.buildDirectory.dir("errorProne"))
-                it.options.compilerArgs = compileTask.options.compilerArgs.toMutableList()
-                it.options.annotationProcessorPath =
-                    compileTask.options.annotationProcessorPath?.let{ it + config } ?: config
-                it.options.bootstrapClasspath = compileTask.options.bootstrapClasspath
-                it.sourceCompatibility = compileTask.sourceCompatibility
-                it.targetCompatibility = compileTask.targetCompatibility
-                it.configureWithErrorProne()
-            },
-            onRegister = { errorProneProvider ->
-                // will it resolve task?
-                // tasks.named("check").configure { it.dependsOn(errorProneProvider) }
-            }
-        )
+    private fun Project.makeErrorProneTask() {
+
     }
 
 
