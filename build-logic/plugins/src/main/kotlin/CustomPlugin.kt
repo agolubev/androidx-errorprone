@@ -26,20 +26,16 @@ import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.kotlin.dsl.exclude
 import org.gradle.process.CommandLineArgumentProvider
 
-/**
- * This custom plugin will register a task output as a generated source folder for
- * android Assets.
- *
- * It will also create a Task to verify that the generated sources are properly
- * accounted for during building.
- */
 private const val ERROR_PRONE_CONFIGURATION = "errorprone"
 private const val ERROR_PRONE_VERSION = "com.google.errorprone:error_prone_core:2.14.0"
+private const val ERROR_PRONE_VARIANT = "Release"
 
 class CustomPlugin : Plugin<Project> {
 
     override fun apply(project: Project) {
         project.afterEvaluate {
+            // delay initialization until after AGP's afterEvaluate returns,
+            // so we can guarantee the error prone task is registered after the java compile task is
             project.makeErrorProneTask()
         }
     }
@@ -61,15 +57,21 @@ private fun Project.makeErrorProneTask() {
     maybeRegister<JavaCompile>(
         name = "runErrorProne",
         onConfigure = {
-            val compileTask = this.tasks.withType(JavaCompile::class.java)
-                .matching { task -> task.name.contains("Release") }.firstOrNull()
+            // main logic is placed here to have action configuration happens after
+            // Gradle configure phase. So if you run task that does not trigger `errorProne` -
+            // this call back will not be executed
+            val compileTask =
+                tasks.withType(JavaCompile::class.java)
+                    // rely on AGP task name as it fairly stable and gives access to all
+                    // task attributes once it configures
+                    .named("compile${ERROR_PRONE_VARIANT}JavaWithJavac")
+                    .get() // will throw illegal state if task is not there
 
-            require(compileTask != null)
             val config = createErrorProneConfiguration()
             it.classpath = compileTask.classpath
             it.source = compileTask.source
             it.destinationDirectory.set(layout.buildDirectory.dir("errorProne"))
-            it.options.compilerArgs = compileTask.options.compilerArgs.toMutableList()
+            it.options.compilerArgumentProviders += compileTask.options.compilerArgumentProviders
             it.options.annotationProcessorPath =
                 compileTask.options.annotationProcessorPath?.let { collection -> collection + config }
                     ?: config
